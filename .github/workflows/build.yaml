@@ -1,0 +1,54 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency: build-deploy
+
+jobs:
+  build:
+    # The scaffolder's initial commit already carries src/ — at creation the
+    # instance boots on the picked release image, so only build on real
+    # developer pushes, not on the repo's first commit.
+    if: ${{ !contains(github.event.head_commit.message, 'initial commit') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # DOCKERHUB_USERNAME / DOCKERHUB_TOKEN are the DEVELOPER's own repo
+      # secrets (this repo's Settings -> Secrets -> Actions) for their own
+      # Docker Hub account. Builds are pushed ONLY to the developer's repo
+      # (kishorereddy91/demo-website) — never to the main release repo.
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push the developer image
+        run: |
+          docker build -t kishorereddy91/demo-website:latest .
+          docker push kishorereddy91/demo-website:latest
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::003904517980:role/backstage-terraform-github-actions
+          aws-region: us-east-1
+
+      - name: Redeploy on the instance
+        run: |
+          IP=$(aws s3 cp s3://vijay-backstage-tfstate-v2/ec2-instances/vijay/terraform.tfstate - | python3 -c "import json,sys; print(json.load(sys.stdin)['outputs']['instance_public_ip']['value'])")
+          aws s3 cp s3://vijay-backstage-tfstate-v2/ec2-instances/vijay/vijay.pem ./vijay.pem
+          chmod 400 vijay.pem
+          ssh -o StrictHostKeyChecking=no -i vijay.pem ec2-user@$IP \
+            "sudo docker pull kishorereddy91/demo-website:latest && (sudo docker rm -f app || true) && sudo docker run -d --restart unless-stopped --name app -p 80:80 kishorereddy91/demo-website:latest"

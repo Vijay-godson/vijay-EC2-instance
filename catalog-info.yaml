@@ -1,0 +1,20 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: vijay
+  description: EC2 Instance in us-east-1 environment
+  annotations:
+    grafana/dashboard-selector: vijay
+    github.com/project-slug: Vijay-godson/vijay-EC2-instance
+    backstage.io/techdocs-ref: dir:.
+  links:
+  - url: http://app-url.invalid
+    title: Application
+    icon: web
+  - url: https://s3.console.aws.amazon.com/s3/object/vijay-backstage-tfstate-v2?region=us-east-1&prefix=ec2-instances/vijay/vijay.pem
+    title: SSH Key (S3)
+    icon: download
+spec:
+  type: ec2-instance
+  lifecycle: experimental
+  owner: development

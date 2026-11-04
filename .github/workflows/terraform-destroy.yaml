@@ -1,0 +1,54 @@
+name: Terraform Destroy Pipeline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Infrastructure Code
+        uses: actions/checkout@v4
+
+      - name: AWS Provider Credentials Configuration
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::003904517980:role/backstage-terraform-github-actions
+          aws-region: us-east-1
+
+      - name: Setup Terraform Core
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: config
+        run: terraform init -backend-config="key=ec2-instances/vijay/terraform.tfstate"
+
+      - name: Terraform Destroy Plan
+        working-directory: config
+        run: terraform plan -destroy -var-file=terraform.tfvars
+
+      - name: Terraform Destroy Execution
+        working-directory: config
+        run: terraform destroy -var-file=terraform.tfvars -auto-approve
+
+      - name: Sweep Orphaned Resources
+        run: |
+          SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values=vijay-app-sg --query 'SecurityGroups[0].GroupId' --output text)
+          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+            aws ec2 delete-security-group --group-id "$SG_ID" || echo "Security group $SG_ID could not be deleted (still attached?); continuing"
+          else
+            echo "No orphaned security group found"
+          fi
+          aws ec2 delete-key-pair --key-name vijay-key || true
+
+      - name: Remove Remote State
+        run: aws s3 rm s3://vijay-backstage-tfstate-v2/ec2-instances/vijay/ --recursive
+
+      - name: Delete Repository
+        env:
+          GH_TOKEN: ${{ secrets.REPO_DELETE_TOKEN }}
+        run: gh api -X DELETE /repos/Vijay-godson/vijay-EC2-instance
